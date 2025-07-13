@@ -34,15 +34,36 @@ def migrate_old_backup_file():
 class PlaylistLogger:
     def __init__(self):
         # Try to migrate legacy cache files from different locations (silent mode)
-        from spotify_to_ytmusic.settings import migrate_legacy_cache_files
+        from spotify_to_ytmusic.settings import (
+            migrate_legacy_cache_files, 
+            ensure_cache_directory_exists,
+            find_cache_directory_across_platforms,
+            create_cross_platform_symlinks
+        )
+        
         migrate_legacy_cache_files(verbose=False)
         
         # Also migrate old backup file if it exists (for backwards compatibility)
         migrate_old_backup_file()
         
-        # Use the same cache directory where credentials are stored
-        self.log_file = BACKUP_LOG_FILE
-        # Ensure the parent directory exists
+        # Find the correct cache directory across platforms
+        actual_cache_dir = find_cache_directory_across_platforms()
+        
+        # If we found an alternative location, use it
+        if actual_cache_dir != BACKUP_LOG_FILE.parent:
+            self.log_file = actual_cache_dir / "playlist_operations.json"
+            print(f"Using cache directory: {actual_cache_dir}")
+        else:
+            self.log_file = BACKUP_LOG_FILE
+        
+        # Ensure the cache directory exists and is accessible
+        if not ensure_cache_directory_exists():
+            raise RuntimeError(f"Cannot access or create cache directory: {self.log_file.parent}")
+        
+        # Create cross-platform symlinks to help with discovery
+        create_cross_platform_symlinks()
+        
+        # Ensure the parent directory exists (double check)
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.logs = self.load_logs()
 
@@ -244,12 +265,27 @@ class PlaylistLogger:
         }
 
     def get_log_location(self) -> str:
-        """Get the path where the playlist logs are stored"""
+        """Get the location of the log file"""
         return str(self.log_file)
 
-    def get_log_size(self) -> int:
-        """Get the size of the log file in bytes"""
+    def verify_log_access(self) -> bool:
+        """Verify that the log file location is accessible"""
         try:
-            return self.log_file.stat().st_size if self.log_file.exists() else 0
-        except OSError:
-            return 0
+            # Test if we can write to the directory
+            test_file = self.log_file.parent / ".test_write"
+            test_file.write_text("test")
+            test_file.unlink()
+            return True
+        except Exception:
+            return False
+
+    def get_debug_info(self) -> Dict:
+        """Get debug information about the logger state"""
+        return {
+            "log_file_path": str(self.log_file),
+            "log_file_exists": self.log_file.exists(),
+            "log_directory_exists": self.log_file.parent.exists(),
+            "log_directory_writable": self.verify_log_access(),
+            "total_operations": len(self.logs.get("operations", [])),
+            "total_playlists": len(self.logs.get("playlist_states", {}))
+        }

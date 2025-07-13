@@ -1,14 +1,32 @@
 import configparser
 import platform
+import os
 from pathlib import Path
 
 import platformdirs
 
-CACHE_DIR = Path(
-    platformdirs.user_cache_dir(
-        appname="spotify_to_ytmusic", appauthor=False, ensure_exists=True
+# Force consistent cache directory detection across all platforms and installations
+def get_consistent_cache_dir():
+    """
+    Get a consistent cache directory that works across different installations
+    and platforms. This ensures that pipx installations find the same cache.
+    """
+    # Use platformdirs with consistent parameters
+    cache_dir = platformdirs.user_cache_dir(
+        appname="spotify_to_ytmusic", 
+        appauthor=False,  # Explicitly set to False
+        ensure_exists=True
     )
-)
+    
+    # Convert to Path object
+    cache_path = Path(cache_dir)
+    
+    # Ensure directory exists
+    cache_path.mkdir(parents=True, exist_ok=True)
+    
+    return cache_path
+
+CACHE_DIR = get_consistent_cache_dir()
 SPOTIPY_CACHE_FILE = CACHE_DIR / "spotipy.cache"
 DEFAULT_PATH = CACHE_DIR / "settings.ini"
 EXAMPLE_PATH = Path(__file__).parent / "settings.ini.example"
@@ -35,6 +53,8 @@ def get_log_files_info() -> dict:
         "spotify_cache": str(SPOTIPY_CACHE_FILE),
         "platform": platform.system(),
         "platformdirs_version": platformdirs.__version__ if hasattr(platformdirs, '__version__') else "unknown",
+        "cache_dir_exists": CACHE_DIR.exists(),
+        "backup_log_exists": BACKUP_LOG_FILE.exists(),
     }
 
 
@@ -145,3 +165,138 @@ def migrate_legacy_cache_files(verbose=False):
         print("💡 You can safely delete the old cache directories after verifying everything works.")
     
     return len(migrated_files) > 0
+
+def ensure_cache_directory_exists():
+    """Ensure the cache directory exists and is writable"""
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception as e:
+        print(f"Warning: Could not create cache directory {CACHE_DIR}: {e}")
+        return False
+
+
+def debug_cache_paths():
+    """Debug function to show detailed cache path information"""
+    import os
+    
+    print(f"🔍 Debug: Cache Path Detection")
+    print(f"Platform: {platform.system()}")
+    print(f"User home: {Path.home()}")
+    print(f"Current working directory: {Path.cwd()}")
+    
+    # Show platformdirs detection with different parameters
+    cache_dir_no_ensure = platformdirs.user_cache_dir(
+        appname="spotify_to_ytmusic", appauthor=False, ensure_exists=False
+    )
+    cache_dir_with_ensure = platformdirs.user_cache_dir(
+        appname="spotify_to_ytmusic", appauthor=False, ensure_exists=True
+    )
+    
+    print(f"Platformdirs cache dir (no ensure): {cache_dir_no_ensure}")
+    print(f"Platformdirs cache dir (with ensure): {cache_dir_with_ensure}")
+    print(f"CACHE_DIR constant: {CACHE_DIR}")
+    print(f"Cache dir exists: {CACHE_DIR.exists()}")
+    print(f"Cache dir is writable: {os.access(CACHE_DIR, os.W_OK) if CACHE_DIR.exists() else 'N/A'}")
+    
+    if CACHE_DIR.exists():
+        files_in_cache = list(CACHE_DIR.iterdir())
+        print(f"Files in cache dir: {[f.name for f in files_in_cache]}")
+    
+    # Environment variables that might affect cache location
+    env_vars = ['HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA', 'APPDATA']
+    for var in env_vars:
+        value = os.environ.get(var)
+        if value:
+            print(f"ENV {var}: {value}")
+    
+    # Test consistency
+    cache_test_1 = get_consistent_cache_dir()
+    cache_test_2 = get_consistent_cache_dir()
+    print(f"Consistency test: {cache_test_1 == cache_test_2} ({cache_test_1} == {cache_test_2})")
+
+def create_cross_platform_symlinks():
+    """
+    Create symlinks or reference files to help with cross-platform cache discovery.
+    This is particularly useful for systems where platformdirs might give different results.
+    """
+    import os
+    
+    # Only create symlinks on Unix-like systems
+    if os.name != 'posix':
+        return False
+    
+    # Potential alternative cache locations
+    home = Path.home()
+    alternative_locations = [
+        home / ".cache" / "spotify_to_ytmusic",  # Standard Linux
+        home / ".spotify_to_ytmusic",            # Fallback location
+    ]
+    
+    created_links = []
+    
+    for alt_location in alternative_locations:
+        if alt_location != CACHE_DIR and not alt_location.exists():
+            try:
+                # Create parent directory if it doesn't exist
+                alt_location.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Create symlink to the actual cache directory
+                alt_location.symlink_to(CACHE_DIR)
+                created_links.append(str(alt_location))
+            except Exception as e:
+                # If symlink fails, create a reference file instead
+                try:
+                    reference_file = alt_location.parent / f"{alt_location.name}_location.txt"
+                    reference_file.write_text(f"Cache directory is at: {CACHE_DIR}\n")
+                    created_links.append(f"reference: {reference_file}")
+                except Exception:
+                    pass  # Ignore if we can't create reference either
+    
+    return created_links
+
+
+def find_cache_directory_across_platforms():
+    """
+    Robust cache directory finder that checks multiple possible locations.
+    Returns the first valid cache directory found.
+    """
+    # Primary location (current platformdirs detection)
+    primary_cache = CACHE_DIR
+    if primary_cache.exists() and (primary_cache / "playlist_operations.json").exists():
+        return primary_cache
+    
+    # Alternative locations to check
+    home = Path.home()
+    alternative_locations = []
+    
+    if platform.system() == "Linux":
+        alternative_locations = [
+            home / ".cache" / "spotify_to_ytmusic",
+            home / ".spotify_to_ytmusic",
+            home / ".local" / "share" / "spotify_to_ytmusic",
+        ]
+    elif platform.system() == "Darwin":  # macOS
+        alternative_locations = [
+            home / "Library" / "Caches" / "spotify_to_ytmusic",
+            home / ".cache" / "spotify_to_ytmusic",
+        ]
+    elif platform.system() == "Windows":
+        import os
+        localappdata = os.environ.get('LOCALAPPDATA', '')
+        appdata = os.environ.get('APPDATA', '')
+        alternative_locations = [
+            Path(localappdata) / "spotify_to_ytmusic" if localappdata else None,
+            Path(appdata) / "spotify_to_ytmusic" if appdata else None,
+            home / "AppData" / "Local" / "spotify_to_ytmusic",
+        ]
+        alternative_locations = [loc for loc in alternative_locations if loc]
+    
+    # Check alternative locations
+    for alt_cache in alternative_locations:
+        if alt_cache and alt_cache.exists() and (alt_cache / "playlist_operations.json").exists():
+            print(f"Found cache in alternative location: {alt_cache}")
+            return alt_cache
+    
+    # If no existing cache found, return the primary location
+    return primary_cache

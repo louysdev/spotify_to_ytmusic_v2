@@ -75,8 +75,11 @@ def _print_success(name, playlistId):
         f"https://music.youtube.com/playlist?list={playlistId}"
     )
     # Show where logs are stored on first success
-    logger = PlaylistLogger()
-    print(f"Operation logged to: {logger.get_log_location()}")
+    try:
+        logger = PlaylistLogger()
+        print(f"Operation logged to: {logger.get_log_location()}")
+    except Exception:
+        pass  # Silently fail for logging location display
 
 
 def _init():
@@ -111,7 +114,11 @@ def all(args):
 
 
 def _create_ytmusic(args, playlist, ytmusic, operation_type="create"):
-    logger = PlaylistLogger()
+    try:
+        logger = PlaylistLogger()
+    except Exception as e:
+        print(f"⚠️  Warning: Could not initialize logging: {e}")
+        logger = None
     
     date = ""
     if args.date:
@@ -131,16 +138,17 @@ def _create_ytmusic(args, playlist, ytmusic, operation_type="create"):
     )
     
     # Log the operation
-    logger.log_playlist_operation(
-        operation_type=operation_type,
-        spotify_playlist_name=playlist["name"],
-        youtube_playlist_name=name,
-        tracks=playlist["tracks"],
-        youtube_playlist_id=playlistId,
-        success=True,
-        tracks_found=tracks_found,
-        tracks_total=len(playlist["tracks"])
-    )
+    if logger:
+        logger.log_playlist_operation(
+            operation_type=operation_type,
+            spotify_playlist_name=playlist["name"],
+            youtube_playlist_name=name,
+            tracks=playlist["tracks"],
+            youtube_playlist_id=playlistId,
+            success=True,
+            tracks_found=tracks_found,
+            tracks_total=len(playlist["tracks"])
+        )
     
     _print_success(name, playlistId)
 
@@ -161,7 +169,15 @@ def liked(args):
 
 def all_saved(args):
     spotify, ytmusic = _init()
-    logger = PlaylistLogger()
+    
+    # Initialize logger with error handling
+    try:
+        logger = PlaylistLogger()
+        print(f"📋 Using log file: {logger.get_log_location()}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not initialize PlaylistLogger: {e}")
+        print("Continuing without logging...")
+        logger = None
     
     if not isinstance(spotify.api.auth_manager, spotipy.SpotifyOAuth):
         raise Exception("OAuth not configured, please run setup and set OAuth to 'yes'")
@@ -256,33 +272,33 @@ def all_saved(args):
                     ytmusic.rate_song(id, "LIKE")
             
             # Log the operation
-            logger.log_playlist_operation(
-                operation_type="all-saved",
-                spotify_playlist_name=p["name"],
-                youtube_playlist_name=playlist_name,
-                tracks=playlist["tracks"],
-                youtube_playlist_id=playlist_id,
-                success=True,
-                tracks_found=tracks_found,
-                tracks_total=len(playlist["tracks"])
-            )
+            if logger:
+                logger.log_playlist_operation(
+                    operation_type="all-saved",
+                    spotify_playlist_name=p["name"],
+                    youtube_playlist_name=playlist_name,
+                    tracks=playlist["tracks"],
+                    youtube_playlist_id=playlist_id,
+                    success=True,
+                    tracks_found=tracks_found,
+                    tracks_total=len(playlist["tracks"])
+                )
             
             _print_success(playlist_name, playlist_id)
             transferred += 1
         except Exception as ex:
             # Log failed operation
-            logger.log_playlist_operation(
-                operation_type="all-saved",
-                spotify_playlist_name=p["name"],
-                youtube_playlist_name=playlist_name,
-                tracks=playlist.get("tracks", []),
-                success=False,
-                tracks_found=0,
-                tracks_total=len(playlist.get("tracks", []))
-            )
-            print(f"Could not transfer {content_type.lower()} '{playlist_name}'. {ex!s}")
-    
-    print(f"\nTransfer completed: {transferred} transferred, {skipped} skipped")
+            if logger:
+                logger.log_playlist_operation(
+                    operation_type="all-saved",
+                    spotify_playlist_name=p["name"],
+                    youtube_playlist_name=playlist_name,
+                    tracks=playlist.get("tracks", []),
+                    success=False,
+                    tracks_found=0,
+                    tracks_total=len(playlist.get("tracks", []))
+                )
+            print(f"Could not transfer {content_type.lower()} '{playlist_name}'. {ex}")
 
 
 def update(args):
@@ -298,7 +314,15 @@ def update(args):
 
 def update_all(args):
     spotify, ytmusic = _init()
-    logger = PlaylistLogger()
+    
+    # Initialize logger with error handling
+    try:
+        logger = PlaylistLogger()
+        print(f"📋 Using log file: {logger.get_log_location()}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not initialize PlaylistLogger: {e}")
+        print("Continuing without advanced comparison features...")
+        logger = None
     
     if not isinstance(spotify.api.auth_manager, spotipy.SpotifyOAuth):
         raise Exception("OAuth not configured, please run setup and set OAuth to 'yes'")
@@ -369,12 +393,14 @@ def update_all(args):
             youtube_tracks = ytmusic.get_playlist_tracks(existing_playlist["id"])
             
             # Check if playlist is up to date based on logs (fast check with size comparison)
-            log_status = logger.is_playlist_up_to_date(
-                p["name"], 
-                spotify_tracks, 
-                existing_playlist["title"], 
-                len(youtube_tracks)
-            )
+            log_status = None
+            if logger:
+                log_status = logger.is_playlist_up_to_date(
+                    p["name"], 
+                    spotify_tracks, 
+                    existing_playlist["title"], 
+                    len(youtube_tracks)
+                )
             
             if log_status and log_status.get("up_to_date"):
                 print(f"  📋 Log shows up-to-date (last updated: {log_status['last_updated'][:10]}) - SKIPPED")
@@ -450,31 +476,33 @@ def update_all(args):
             ytmusic.add_playlist_items(existing_playlist["id"], videoIds)
             
             # Log the successful update
-            logger.log_playlist_operation(
-                operation_type="update-all",
-                spotify_playlist_name=p["name"],
-                youtube_playlist_name=existing_playlist["title"],
-                tracks=spotify_tracks,
-                youtube_playlist_id=existing_playlist["id"],
-                success=True,
-                tracks_found=len(available_spotify_tracks),
-                tracks_total=len(spotify_tracks)
-            )
+            if logger:
+                logger.log_playlist_operation(
+                    operation_type="update-all",
+                    spotify_playlist_name=p["name"],
+                    youtube_playlist_name=existing_playlist["title"],
+                    tracks=spotify_tracks,
+                    youtube_playlist_id=existing_playlist["id"],
+                    success=True,
+                    tracks_found=len(available_spotify_tracks),
+                    tracks_total=len(spotify_tracks)
+                )
             
             print(f"  ✅ Updated successfully")
             updated += 1
             
         except Exception as ex:
             # Log failed update
-            logger.log_playlist_operation(
-                operation_type="update-all",
-                spotify_playlist_name=p["name"],
-                youtube_playlist_name=existing_playlist.get("title", playlist_name) if 'existing_playlist' in locals() else playlist_name,
-                tracks=spotify_tracks if 'spotify_tracks' in locals() else [],
-                success=False,
-                tracks_found=0,
-                tracks_total=len(spotify_tracks) if 'spotify_tracks' in locals() else 0
-            )
+            if logger:
+                logger.log_playlist_operation(
+                    operation_type="update-all",
+                    spotify_playlist_name=p["name"],
+                    youtube_playlist_name=existing_playlist.get("title", playlist_name) if 'existing_playlist' in locals() else playlist_name,
+                    tracks=spotify_tracks if 'spotify_tracks' in locals() else [],
+                    success=False,
+                    tracks_found=0,
+                    tracks_total=len(spotify_tracks) if 'spotify_tracks' in locals() else 0
+                )
             print(f"  ❌ Could not update: {ex!s}")
     
     print(f"\nUpdate completed: {updated} updated, {skipped} already up-to-date, {not_found} not found in YouTube Music")
@@ -511,31 +539,44 @@ def cache_clear(args):
 
 
 def log_stats(args):
-    logger = PlaylistLogger()
-    stats = logger.get_stats()
+    try:
+        logger = PlaylistLogger()
+        stats = logger.get_stats()
+        
+        print("📊 Playlist Operation Statistics")
+        print("=" * 40)
+        print(f"Total operations: {stats['total_operations']}")
+        print(f"Total playlists tracked: {stats['total_playlists']}")
+        print(f"Successful operations: {stats['successful_operations']}")
+        print(f"Failed operations: {stats['failed_operations']}")
+        
+        if stats.get('last_operation'):
+            print(f"Last operation: {stats['last_operation'][:19]}")
+        
+        if stats.get('operations_by_type'):
+            print("\nOperations by type:")
+            for op_type, count in stats['operations_by_type'].items():
+                print(f"  {op_type}: {count}")
+        
+        print(f"\nLog file location: {logger.log_file}")
     
-    print("📊 Playlist Operation Statistics")
-    print("=" * 40)
-    print(f"Total operations: {stats['total_operations']}")
-    print(f"Total playlists tracked: {stats['total_playlists']}")
-    print(f"Successful operations: {stats['successful_operations']}")
-    print(f"Failed operations: {stats['failed_operations']}")
-    
-    if stats.get('last_operation'):
-        print(f"Last operation: {stats['last_operation'][:19]}")
-    
-    if stats.get('operations_by_type'):
-        print("\nOperations by type:")
-        for op_type, count in stats['operations_by_type'].items():
-            print(f"  {op_type}: {count}")
-    
-    print(f"\nLog file location: {logger.log_file}")
+    except Exception as e:
+        print(f"❌ Could not load log statistics: {e}")
+        print("This may indicate that no operations have been logged yet or there's a cache issue.")
+        print("Try running 'spotify_to_ytmusic cache-debug' for more information.")
 
 
 def initial_setup(args):
     """Scan existing YouTube Music playlists and populate logs for future tracking"""
     spotify, ytmusic = _init()
-    logger = PlaylistLogger()
+    
+    try:
+        logger = PlaylistLogger()
+        print(f"📋 Using log file: {logger.get_log_location()}")
+    except Exception as e:
+        print(f"❌ Could not initialize PlaylistLogger: {e}")
+        print("Cannot proceed with initial setup without logging capability.")
+        return
     
     if not isinstance(spotify.api.auth_manager, spotipy.SpotifyOAuth):
         raise Exception("OAuth not configured, please run setup and set OAuth to 'yes'")
@@ -759,3 +800,73 @@ def cache_migrate(args):
         status = "✅ EXISTS" if exists else "❌ MISSING"
         print(f"  {name}: {status}")
         print(f"    Path: {filepath}")
+
+
+def cache_debug(args):
+    """Show detailed cache directory debug information"""
+    from spotify_to_ytmusic.settings import (
+        debug_cache_paths, 
+        ensure_cache_directory_exists, 
+        get_log_files_info,
+        find_cache_directory_across_platforms,
+        create_cross_platform_symlinks
+    )
+    from spotify_to_ytmusic.utils.playlist_logger import PlaylistLogger
+    
+    print("🐛 Cache Directory Debug Information")
+    print("=" * 50)
+    
+    debug_cache_paths()
+    
+    print(f"\n🔍 Cross-Platform Cache Detection:")
+    robust_cache = find_cache_directory_across_platforms()
+    print(f"Detected cache directory: {robust_cache}")
+    
+    print(f"\n🔗 Cross-Platform Symlinks:")
+    symlinks = create_cross_platform_symlinks()
+    if symlinks:
+        for link in symlinks:
+            print(f"  Created: {link}")
+    else:
+        print("  No symlinks created (not needed or not supported)")
+    
+    print(f"\n📁 Cache Directory Status:")
+    cache_ok = ensure_cache_directory_exists()
+    if cache_ok:
+        print("✅ Cache directory is accessible and writable")
+    else:
+        print("❌ Cache directory has issues")
+    
+    print(f"\n📋 File Status:")
+    log_info = get_log_files_info()
+    
+    files_to_check = [
+        ("Settings", log_info['settings_file']),
+        ("Spotify cache", log_info['spotify_cache']),
+        ("Playlist log", log_info['backup_log']),
+        ("No results log", log_info['no_results_log'])
+    ]
+    
+    for name, filepath in files_to_check:
+        from pathlib import Path
+        path_obj = Path(filepath)
+        exists = path_obj.exists()
+        readable = exists and path_obj.is_file()
+        size = path_obj.stat().st_size if exists else 0
+        
+        status = "✅" if exists else "❌"
+        print(f"  {status} {name}:")
+        print(f"     Path: {filepath}")
+        print(f"     Exists: {exists}, Readable: {readable}, Size: {size} bytes")
+    
+    print(f"\n🔍 PlaylistLogger Test:")
+    try:
+        logger = PlaylistLogger()
+        debug_info = logger.get_debug_info()
+        print("✅ PlaylistLogger initialized successfully")
+        for key, value in debug_info.items():
+            print(f"     {key}: {value}")
+    except Exception as e:
+        print(f"❌ PlaylistLogger failed to initialize: {e}")
+        import traceback
+        traceback.print_exc()

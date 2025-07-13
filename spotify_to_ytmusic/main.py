@@ -265,6 +265,11 @@ def get_args(args=None):
     )
     cache_migrate_parser.set_defaults(func=controllers.cache_migrate)
 
+    cache_debug_parser = subparsers.add_parser(
+        "cache-debug", help="Show detailed cache directory debug information"
+    )
+    cache_debug_parser.set_defaults(func=controllers.cache_debug)
+
     return parser.parse_args(args)
 
 
