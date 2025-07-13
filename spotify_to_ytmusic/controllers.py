@@ -14,7 +14,7 @@ from spotify_to_ytmusic.utils.playlist_logger import PlaylistLogger
 from spotify_to_ytmusic.settings import get_log_files_info
 
 
-def show_log_location():
+def show_log_location(args):
     """Show the user where log files are stored"""
     log_info = get_log_files_info()
     print("\nLog files and credentials are stored in:")
