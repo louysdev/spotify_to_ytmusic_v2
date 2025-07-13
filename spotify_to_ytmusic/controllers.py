@@ -16,13 +16,46 @@ from spotify_to_ytmusic.settings import get_log_files_info
 
 def show_log_location(args):
     """Show the user where log files are stored"""
+    from spotify_to_ytmusic.settings import migrate_legacy_cache_files
+    
+    # Try to migrate legacy cache files first (verbose mode)
+    migrated = migrate_legacy_cache_files(verbose=True)
+    if migrated:
+        print()  # Add spacing after migration output
+    
     log_info = get_log_files_info()
-    print("\nLog files and credentials are stored in:")
+    print(f"📂 Log files and credentials are stored in:")
+    print(f"Platform: {log_info['platform']}")
     print(f"Cache directory: {log_info['cache_directory']}")
     print(f"- Settings file: {log_info['settings_file']}")
     print(f"- Spotify cache: {log_info['spotify_cache']}")
     print(f"- Playlist operations log: {log_info['backup_log']}")
     print(f"- No results log: {log_info['no_results_log']}")
+    print(f"\n💡 This location is automatically detected for your operating system.")
+    print(f"   If you're using multiple systems, each will have its own cache directory.")
+    
+    # Check if files actually exist
+    from pathlib import Path
+    files_to_check = [
+        ("Settings", log_info['settings_file']),
+        ("Spotify cache", log_info['spotify_cache']),
+        ("Playlist log", log_info['backup_log']),
+        ("No results log", log_info['no_results_log'])
+    ]
+    
+    existing_files = []
+    missing_files = []
+    
+    for name, filepath in files_to_check:
+        if Path(filepath).exists():
+            existing_files.append(name)
+        else:
+            missing_files.append(name)
+    
+    if existing_files:
+        print(f"\n✅ Existing files: {', '.join(existing_files)}")
+    if missing_files:
+        print(f"⚠️  Missing files: {', '.join(missing_files)} (will be created when needed)")
 
 
 def _get_spotify_playlist(spotify, playlist):
@@ -693,3 +726,36 @@ def all_sync(args):
     finally:
         print(f"\n🏁 All-sync stopped after {cycle_count} cycle(s)")
         print("Thank you for using spotify-to-ytmusic!")
+
+
+def cache_migrate(args):
+    """Manually check and migrate cache files from legacy locations"""
+    from spotify_to_ytmusic.settings import migrate_legacy_cache_files, get_log_files_info
+    
+    print("🔍 Checking for legacy cache files...")
+    migrated = migrate_legacy_cache_files(verbose=True)
+    
+    if not migrated:
+        print("✅ No legacy cache files found. All files are in the correct location.")
+    
+    # Show current locations
+    print("\n📂 Current cache locations:")
+    log_info = get_log_files_info()
+    print(f"Platform: {log_info['platform']}")
+    print(f"Cache directory: {log_info['cache_directory']}")
+    
+    # Check file existence
+    from pathlib import Path
+    files_to_check = [
+        ("Settings", log_info['settings_file']),
+        ("Spotify cache", log_info['spotify_cache']),
+        ("Playlist log", log_info['backup_log']),
+        ("No results log", log_info['no_results_log'])
+    ]
+    
+    print("\n📋 File status:")
+    for name, filepath in files_to_check:
+        exists = Path(filepath).exists()
+        status = "✅ EXISTS" if exists else "❌ MISSING"
+        print(f"  {name}: {status}")
+        print(f"    Path: {filepath}")

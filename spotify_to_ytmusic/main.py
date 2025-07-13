@@ -260,6 +260,11 @@ def get_args(args=None):
         help="Also scan playlists that match public playlists from this Spotify user ID",
     )
 
+    cache_migrate_parser = subparsers.add_parser(
+        "cache-migrate", help="Manually check and migrate cache files from legacy locations"
+    )
+    cache_migrate_parser.set_defaults(func=controllers.cache_migrate)
+
     return parser.parse_args(args)
 
 

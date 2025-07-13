@@ -33,7 +33,11 @@ def migrate_old_backup_file():
 
 class PlaylistLogger:
     def __init__(self):
-        # Migrate old backup file if it exists
+        # Try to migrate legacy cache files from different locations (silent mode)
+        from spotify_to_ytmusic.settings import migrate_legacy_cache_files
+        migrate_legacy_cache_files(verbose=False)
+        
+        # Also migrate old backup file if it exists (for backwards compatibility)
         migrate_old_backup_file()
         
         # Use the same cache directory where credentials are stored
