@@ -324,86 +324,112 @@ def update_all(args):
         print("Continuing without advanced comparison features...")
         logger = None
     
+    if not logger:
+        print("❌ Cannot proceed without logging. Please run 'spotify_to_ytmusic initial-setup' first.")
+        return
+    
     if not isinstance(spotify.api.auth_manager, spotipy.SpotifyOAuth):
         raise Exception("OAuth not configured, please run setup and set OAuth to 'yes'")
     
-    # Collect all playlists from different sources (same logic as all_saved)
-    all_playlists = []
+    # Get tracked playlists from logs instead of scanning Spotify
+    print("🔍 Getting tracked playlists from logs...")
+    tracked_playlists = logger.get_tracked_playlists()
     
-    # Get current user's saved playlists
-    saved_playlists = spotify.getAllSavedPlaylists()
-    all_playlists.extend(saved_playlists)
-    print(f"{len(saved_playlists)} saved playlists found from current user")
+    if not tracked_playlists:
+        print("❌ No tracked playlists found in logs!")
+        print("Please run 'spotify_to_ytmusic initial-setup' first to populate the logs.")
+        return
     
-    # Get saved albums automatically
-    try:
-        saved_albums = spotify.getSavedAlbums()
-        all_playlists.extend(saved_albums)
-        print(f"{len(saved_albums)} saved albums found")
-    except Exception as ex:
-        print(f"Could not get saved albums: {ex}")
-    
-    # Get playlists from target user if specified
-    if args.target_user:
-        try:
-            target_user_playlists = spotify.getUserPlaylists(args.target_user)
-            all_playlists.extend(target_user_playlists)
-            print(f"{len(target_user_playlists)} public playlists found from user '{args.target_user}'")
-        except Exception as ex:
-            print(f"Could not get playlists from user '{args.target_user}': {ex}")
-    
-    print(f"Total: {len(all_playlists)} playlists to analyze. Starting comparison...")
+    print(f"📋 Found {len(tracked_playlists)} tracked playlists in logs")
+    print(f"Starting comparison and update process...")
     
     count = 1
     updated = 0
     skipped = 0
     not_found = 0
+    failed = 0
     
-    for i, p in enumerate(all_playlists):
+    for i, tracked_playlist in enumerate(tracked_playlists):
         # Batch processing with delays
-        if i > 0 and i % args.batch_size == 0:
-            print(f"Processed {i} playlists. Waiting {args.batch_delay} seconds...")
-            time.sleep(args.batch_delay)
+        if i > 0 and i % getattr(args, 'batch_size', 5) == 0:
+            print(f"Processed {i} playlists. Waiting {getattr(args, 'batch_delay', 2)} seconds...")
+            time.sleep(getattr(args, 'batch_delay', 2))
         
-        owner_name = p['owner']['display_name'] if 'owner' in p else 'Unknown'
-        playlist_name = p["name"]
-        content_type = "Album" if p.get("type") == "album" else "Playlist"
+        # Get playlist info from the tracked data
+        youtube_name = tracked_playlist.get('youtube_playlist_name')
+        youtube_id = tracked_playlist.get('youtube_playlist_id')
+        spotify_name = tracked_playlist.get('spotify_playlist_name')
+        last_updated = tracked_playlist.get('timestamp', 'Unknown')
         
-        print(f"\n{content_type} {count}: '{playlist_name}' (by {owner_name})")
-        count += 1
-        
-        # Check if playlist exists in YouTube Music
-        existing_playlist = ytmusic.get_existing_playlist_by_name(playlist_name)
-        if not existing_playlist:
-            print(f"  Not found in YouTube Music - SKIPPED")
-            not_found += 1
+        if not youtube_name or not youtube_id:
+            print(f"\n❌ Playlist {count}: Invalid tracked playlist data - SKIPPED")
+            count += 1
+            failed += 1
             continue
         
-        print(f"  Found in YouTube Music as: '{existing_playlist['title']}'")
+        print(f"\n📋 Playlist {count}: '{youtube_name}' (YouTube)")
+        print(f"   🎵 Linked to Spotify: '{spotify_name}'")
+        print(f"   📅 Last updated: {last_updated[:19] if last_updated != 'Unknown' else 'Unknown'}")
+        count += 1
         
+        # Try to find the current Spotify playlist by name
+        print(f"  🔍 Searching for current Spotify playlist...")
+        spotify_playlist = None
+        spotify_tracks = []
+        
+        # Get all current Spotify playlists to find a match
         try:
-            # Get Spotify tracks
-            if p.get("type") == "album":
-                spotify_tracks = p["tracks"]
+            saved_playlists = spotify.getAllSavedPlaylists()
+            saved_albums = spotify.getSavedAlbums()
+            all_current_spotify = saved_playlists + saved_albums
+            
+            # Try to find matching Spotify playlist/album
+            for sp_item in all_current_spotify:
+                if sp_item["name"].lower() == spotify_name.lower():
+                    spotify_playlist = sp_item
+                    break
+            
+            if spotify_playlist:
+                print(f"  ✅ Found matching Spotify playlist: '{spotify_playlist['name']}'")
+                
+                # Get Spotify tracks
+                if spotify_playlist.get("type") == "album":
+                    spotify_tracks = spotify_playlist["tracks"]
+                else:
+                    full_playlist = spotify.getSpotifyPlaylist(spotify_playlist["external_urls"]["spotify"])
+                    spotify_tracks = full_playlist["tracks"]
             else:
-                spotify_playlist = spotify.getSpotifyPlaylist(p["external_urls"]["spotify"])
-                spotify_tracks = spotify_playlist["tracks"]
-            
-            # Get YouTube Music tracks for size comparison
-            youtube_tracks = ytmusic.get_playlist_tracks(existing_playlist["id"])
-            
-            # Check if playlist is up to date based on logs (fast check with size comparison)
-            log_status = None
-            if logger:
-                log_status = logger.is_playlist_up_to_date(
-                    p["name"], 
-                    spotify_tracks, 
-                    existing_playlist["title"], 
-                    len(youtube_tracks)
-                )
+                print(f"  ⚠️  Spotify playlist '{spotify_name}' not found in current library")
+                print(f"     This might mean the playlist was deleted or renamed in Spotify")
+                not_found += 1
+                continue
+                
+        except Exception as ex:
+            print(f"  ❌ Error getting Spotify playlist: {ex}")
+            failed += 1
+            continue
+        
+        # Get YouTube Music tracks for comparison
+        try:
+            print(f"  🔍 Getting YouTube Music playlist tracks...")
+            youtube_tracks = ytmusic.get_playlist_tracks(youtube_id)
+            print(f"  📊 Spotify: {len(spotify_tracks)} tracks, YouTube: {len(youtube_tracks)} tracks")
+        except Exception as ex:
+            print(f"  ❌ Error getting YouTube Music tracks: {ex}")
+            failed += 1
+            continue
+        
+        # Check if playlist is up to date based on logs (fast check)
+        try:
+            log_status = logger.is_playlist_up_to_date(
+                spotify_name,
+                spotify_tracks, 
+                youtube_name, 
+                len(youtube_tracks)
+            )
             
             if log_status and log_status.get("up_to_date"):
-                print(f"  📋 Log shows up-to-date (last updated: {log_status['last_updated'][:10]}) - SKIPPED")
+                print(f"  ✅ Up-to-date (last checked: {log_status['last_updated'][:10]}) - SKIPPED")
                 skipped += 1
                 continue
             elif log_status and log_status.get("size_changed"):
@@ -411,14 +437,16 @@ def update_all(args):
             elif log_status and log_status.get("hash_changed"):
                 print(f"  📋 Content change detected (last updated: {log_status['last_updated'][:10]})")
             else:
-                print(f"  📋 No log history found, performing full comparison")
-            
-            print(f"  Spotify: {len(spotify_tracks)} tracks, YouTube: {len(youtube_tracks)} tracks")
-            
-            # First, determine which Spotify tracks are actually available in YouTube Music
-            print(f"  🔍 Checking track availability...")
+                print(f"  📋 No recent log history, performing full comparison")
+                
+        except Exception as ex:
+            print(f"  ⚠️  Could not check log status: {ex}")
+        
+        # Determine which Spotify tracks are actually available in YouTube Music
+        print(f"  🔍 Checking track availability...")
+        try:
+            videoIds = ytmusic.search_songs(spotify_tracks, use_cached=getattr(args, 'use_cached', False))
             available_spotify_tracks = []
-            videoIds = ytmusic.search_songs(spotify_tracks, use_cached=args.use_cached)
             
             # Map successful matches back to original tracks
             for idx, spotify_track in enumerate(spotify_tracks):
@@ -427,7 +455,13 @@ def update_all(args):
             
             print(f"  📊 Available tracks - Spotify: {len(available_spotify_tracks)}, YouTube: {len(youtube_tracks)}")
             
-            # Compare only available tracks
+        except Exception as ex:
+            print(f"  ❌ Error checking track availability: {ex}")
+            failed += 1
+            continue
+        
+        # Compare tracks and decide if update is needed
+        try:
             tracks_match = True
             significant_difference = False
             
@@ -439,73 +473,75 @@ def update_all(args):
                 significant_difference = True
                 print(f"  ⚠️  Significant track count difference: {availability_ratio:.2%} ratio")
             
-            # Check track order for available songs (compare first N tracks where N = min length)
-            if not significant_difference:
+            # Check track order for available songs (if no significant difference)
+            if not significant_difference and len(available_spotify_tracks) > 0 and len(youtube_tracks) > 0:
                 comparison_length = min(len(available_spotify_tracks), len(youtube_tracks))
                 order_matches = 0
                 
-                for idx in range(comparison_length):
+                for idx in range(min(comparison_length, 10)):  # Compare first 10 tracks for performance
                     if idx < len(available_spotify_tracks) and idx < len(youtube_tracks):
                         spotify_track = available_spotify_tracks[idx]
                         youtube_track = youtube_tracks[idx]
                         if ytmusic.compare_track_similarity(spotify_track, youtube_track):
                             order_matches += 1
-                        else:
-                            print(f"  🔄 Track {idx+1} differs: '{spotify_track['name']}' vs '{youtube_track['title']}'")
                 
                 # Consider tracks matching if at least the specified tolerance of compared tracks match in order
-                match_ratio = order_matches / comparison_length if comparison_length > 0 else 1
-                tracks_match = match_ratio >= args.tolerance
+                tolerance = getattr(args, 'tolerance', 0.9)
+                match_ratio = order_matches / min(comparison_length, 10) if comparison_length > 0 else 1
+                tracks_match = match_ratio >= tolerance
                 
-                print(f"  📈 Track order match: {order_matches}/{comparison_length} ({match_ratio:.1%}) - Tolerance: {args.tolerance:.1%}")
+                print(f"  📈 Track order match: {order_matches}/{min(comparison_length, 10)} ({match_ratio:.1%}) - Tolerance: {tolerance:.1%}")
             else:
                 tracks_match = False
             
             if tracks_match and not significant_difference:
-                print(f"  ✅ Tracks match sufficiently (considering availability) - SKIPPED")
+                print(f"  ✅ Tracks match sufficiently - SKIPPED")
                 skipped += 1
                 continue
             
             # Update playlist if tracks don't match significantly
             print(f"  🔄 Updating playlist...")
             
-            if not args.append:
-                ytmusic.remove_songs(existing_playlist["id"])
+            if not getattr(args, 'append', False):
+                ytmusic.remove_songs(youtube_id)
                 time.sleep(2)
             
-            ytmusic.add_playlist_items(existing_playlist["id"], videoIds)
+            ytmusic.add_playlist_items(youtube_id, videoIds)
             
             # Log the successful update
-            if logger:
-                logger.log_playlist_operation(
-                    operation_type="update-all",
-                    spotify_playlist_name=p["name"],
-                    youtube_playlist_name=existing_playlist["title"],
-                    tracks=spotify_tracks,
-                    youtube_playlist_id=existing_playlist["id"],
-                    success=True,
-                    tracks_found=len(available_spotify_tracks),
-                    tracks_total=len(spotify_tracks)
-                )
+            logger.log_playlist_operation(
+                operation_type="update-all",
+                spotify_playlist_name=spotify_name,
+                youtube_playlist_name=youtube_name,
+                tracks=spotify_tracks,
+                youtube_playlist_id=youtube_id,
+                success=True,
+                tracks_found=len(available_spotify_tracks),
+                tracks_total=len(spotify_tracks)
+            )
             
             print(f"  ✅ Updated successfully")
             updated += 1
             
         except Exception as ex:
             # Log failed update
-            if logger:
-                logger.log_playlist_operation(
-                    operation_type="update-all",
-                    spotify_playlist_name=p["name"],
-                    youtube_playlist_name=existing_playlist.get("title", playlist_name) if 'existing_playlist' in locals() else playlist_name,
-                    tracks=spotify_tracks if 'spotify_tracks' in locals() else [],
-                    success=False,
-                    tracks_found=0,
-                    tracks_total=len(spotify_tracks) if 'spotify_tracks' in locals() else 0
-                )
+            logger.log_playlist_operation(
+                operation_type="update-all",
+                spotify_playlist_name=spotify_name,
+                youtube_playlist_name=youtube_name,
+                tracks=spotify_tracks,
+                success=False,
+                tracks_found=0,
+                tracks_total=len(spotify_tracks)
+            )
             print(f"  ❌ Could not update: {ex!s}")
+            failed += 1
     
-    print(f"\nUpdate completed: {updated} updated, {skipped} already up-to-date, {not_found} not found in YouTube Music")
+    print(f"\nUpdate completed:")
+    print(f"✅ Updated: {updated}")
+    print(f"⏭️  Already up-to-date: {skipped}")
+    print(f"❌ Not found in Spotify: {not_found}")
+    print(f"💥 Failed: {failed}")
 
 
 def remove(args):

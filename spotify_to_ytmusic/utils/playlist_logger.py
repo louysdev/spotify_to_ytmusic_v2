@@ -264,6 +264,29 @@ class PlaylistLogger:
             }
         }
 
+    def get_tracked_playlists(self) -> List[Dict]:
+        """Get all tracked playlists from the logs"""
+        tracked_playlists = []
+        
+        for youtube_name, state in self.logs["playlist_states"].items():
+            playlist_info = {
+                "youtube_playlist_name": youtube_name,
+                "youtube_playlist_id": state.get("youtube_id"),
+                "spotify_playlist_name": state.get("spotify_name", youtube_name),
+                "last_updated": state.get("last_updated"),
+                "track_hash": state.get("track_hash"),
+                "tracks_total": state.get("tracks_total", 0),
+                "tracks_found": state.get("tracks_found", 0),
+                "operation": state.get("operation", "unknown"),
+                "timestamp": state.get("last_updated")  # For compatibility
+            }
+            tracked_playlists.append(playlist_info)
+        
+        # Sort by last updated (most recent first)
+        tracked_playlists.sort(key=lambda x: x.get("last_updated", ""), reverse=True)
+        
+        return tracked_playlists
+
     def get_log_location(self) -> str:
         """Get the location of the log file"""
         return str(self.log_file)
