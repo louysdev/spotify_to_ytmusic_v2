@@ -737,19 +737,12 @@ def setup(args):
 
 def all_sync(args):
     """
-    Run all-saved and update-all commands every 1 minute indefinitely until Enter is pressed.
+    Run all-saved and update-all commands every 1 minute indefinitely.
+    Can be stopped with Ctrl+C or by killing the process.
     """
     print("🔄 Starting all-sync mode...")
     print("This will run 'all-saved' followed by 'update-all' every 1 minute.")
-    print("Press Enter at any time to stop the sync process.\n")
-    
-    # Event to signal when to stop
-    stop_event = threading.Event()
-    
-    def input_listener():
-        """Listen for Enter key press in a separate thread"""
-        input("Press Enter to stop the sync process...\n")
-        stop_event.set()
+    print("To stop the sync process, use Ctrl+C or kill the process.\n")
     
     def run_sync_cycle():
         """Run one complete sync cycle (all-saved + update-all)"""
@@ -767,35 +760,24 @@ def all_sync(args):
             
         except KeyboardInterrupt:
             print("\n⏹️  Sync interrupted by user")
-            stop_event.set()
+            raise  # Re-raise to stop the main loop
         except Exception as ex:
             print(f"\n❌ Error during sync cycle: {ex}")
             print("Will retry in next cycle...")
     
-    # Start input listener thread
-    input_thread = threading.Thread(target=input_listener, daemon=True)
-    input_thread.start()
-    
     cycle_count = 0
     try:
-        while not stop_event.is_set():
+        while True:
             cycle_count += 1
             print(f"\n📊 === Sync Cycle #{cycle_count} ===")
             
             run_sync_cycle()
-            
-            if stop_event.is_set():
-                break
                 
-            # Wait 1 minute or until stop signal
+            # Wait 1 minute before next cycle
             print(f"\n⏰ Waiting 1 minute until next sync cycle...")
             print(f"Next sync at: {datetime.fromtimestamp(time.time() + 60).strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Wait in small increments to check for stop signal
-            for _ in range(60):  # 60 seconds = 1 minute
-                if stop_event.is_set():
-                    break
-                time.sleep(1)
+            time.sleep(60)  # Wait 1 minute
     
     except KeyboardInterrupt:
         print("\n⏹️  Sync process interrupted")
