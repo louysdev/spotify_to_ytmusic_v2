@@ -737,10 +737,10 @@ def setup(args):
 
 def all_sync(args):
     """
-    Run all-saved and update-all commands every 15 minutes indefinitely until Enter is pressed.
+    Run all-saved and update-all commands every 1 minute indefinitely until Enter is pressed.
     """
     print("🔄 Starting all-sync mode...")
-    print("This will run 'all-saved' followed by 'update-all' every 15 minutes.")
+    print("This will run 'all-saved' followed by 'update-all' every 1 minute.")
     print("Press Enter at any time to stop the sync process.\n")
     
     # Event to signal when to stop
@@ -787,12 +787,12 @@ def all_sync(args):
             if stop_event.is_set():
                 break
                 
-            # Wait 15 minutes or until stop signal
-            print(f"\n⏰ Waiting 15 minutes until next sync cycle...")
-            print(f"Next sync at: {datetime.fromtimestamp(time.time() + 900).strftime('%Y-%m-%d %H:%M:%S')}")
+            # Wait 1 minute or until stop signal
+            print(f"\n⏰ Waiting 1 minute until next sync cycle...")
+            print(f"Next sync at: {datetime.fromtimestamp(time.time() + 60).strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Wait in small increments to check for stop signal
-            for _ in range(900):  # 900 seconds = 15 minutes
+            for _ in range(60):  # 60 seconds = 1 minute
                 if stop_event.is_set():
                     break
                 time.sleep(1)
